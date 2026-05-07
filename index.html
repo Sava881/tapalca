@@ -2150,14 +2150,15 @@
             updatedAt:Date.now()
           }
         }
-        function onlineSaveData(){
-          return {
-            user:currentUser,
-            game:game,
-            player:onlinePlayerData(),
-            updatedAt:Date.now()
-          }
-        }
+function onlineSaveData(){
+  return {
+    user:currentUser,
+    game:game,
+    player:onlinePlayerData(),
+    deviceId:getDeviceId(),
+    updatedAt:Date.now()
+  }
+}
         async function saveOnline(){
           if(!currentUserPhone||!currentUser||!db)return;
           const key=safePhoneKey(currentUserPhone);
@@ -2170,7 +2171,14 @@
           const snap=await db.ref('saves/'+key).get();
           return snap.exists()?snap.val():null
         }
-         html('navIcon1', icons.box); html('navIcon2', icons.tool); html('navIcon3', icons.trophy); html('navIcon4', icons.list); html('navIcon5', icons.user); const usersKey='workerTapalkaUsers_v1'; const sessionKey='workerTapalkaSessionPhone_v1'; const tournamentLocalKey='workerTapalkaTournamentLocal_v1';
+         html('navIcon1', icons.box); html('navIcon2', icons.tool); html('navIcon3', icons.trophy); html('navIcon4', icons.list); html('navIcon5', icons.user); 
+
+const usersKey='workerTapalkaUsers_v1';
+const sessionKey='workerTapalkaSessionPhone_v1';
+const tournamentLocalKey='workerTapalkaTournamentLocal_v1';
+const deviceKey='workerTapalkaDeviceId_v1';
+const deviceAccountKey='workerTapalkaDeviceAccount_v1';
+
         const firebaseConfig={
           apiKey:'AIzaSyDJZvB6afm-2q0x7LGTwH5u0wB1rrwu61E',
           authDomain:'rabohiy-obzor-tapalca.firebaseapp.com',
@@ -2401,10 +2409,40 @@
             }
           }
         }
-         function setUsers(users) {
-          localStorage.setItem(usersKey, JSON.stringify(users|| {
-          }))
-        }
+function setUsers(users) {
+  localStorage.setItem(usersKey, JSON.stringify(users|| {
+  }))
+}
+
+function getDeviceId() {
+  let id = localStorage.getItem(deviceKey);
+
+  if (!id) {
+    id = 'dev_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 12);
+    localStorage.setItem(deviceKey, id);
+  }
+
+  return id;
+}
+
+async function loadDeviceLock(deviceId) {
+  if (!deviceId || !db) return null;
+
+  const snap = await db.ref('devices/' + deviceId).get();
+
+  return snap.exists() ? snap.val() : null;
+}
+
+async function saveDeviceLock(deviceId, phone) {
+  if (!deviceId || !phone || !db) return;
+
+  await db.ref('devices/' + deviceId).set({
+    phone: phone,
+    createdAt: Date.now()
+  });
+
+  localStorage.setItem(deviceAccountKey, phone);
+}
          function formatAuthPhone(input) {
           let v=String(input.value||'').replace(/\D/g, ''); if(v.startsWith('8'))v='7'+v.slice(1); if(!v.startsWith('7'))v='7'+v; input.value='+'+v.slice(0, 11)
         }
@@ -2422,28 +2460,107 @@
             document.body.classList.add('auth-locked')
           }
         }
-         async function registerUser() {
-          const name=(el('authName')?.value||'').trim(); const surname=(el('authSurname')?.value||'').trim(); const phone=cleanPhone(el('authPhone')?.value||''); if(name.length<2||surname.length<2) {
-            toast('Введите имя и фамилию'); return
-          }
-          if(!/^\+7\d{10}$/.test(phone)) {
-            toast('Введите номер в формате +7XXXXXXXXXX'); return
-          }
-          const users=getUsers(); users[phone]={
-            name, surname, phone, createdAt:new Date().toISOString()
-          }; setUsers(users); localStorage.setItem(sessionKey, phone); currentUserPhone=phone; currentUser=users[phone]; saveKey=makeSaveKey(phone); game=loadGame(); await saveOnline(); toast('Профиль создан онлайн'); unlockApp()
-        }
-         async function loginUser() {
-          const phone=cleanPhone(el('loginPhone')?.value||''); const users=getUsers(); let online=null;
-          if(!users[phone]) {
-            online=await loadOnlineSave(phone);
-            if(!online||!online.user){toast('Номер не найден. Сначала зарегистрируйтесь.'); return}
-            users[phone]=online.user; setUsers(users)
-          } else {
-            online=await loadOnlineSave(phone)
-          }
-          localStorage.setItem(sessionKey, phone); currentUserPhone=phone; currentUser=users[phone]; saveKey=makeSaveKey(phone); game=online&&online.game?Object.assign({}, defaults, online.game):loadGame(); game.daily=Object.assign({}, defaults.daily, game.daily||{}); game.income=Object.assign({}, defaults.income, game.income||{}); localStorage.setItem(saveKey, JSON.stringify(game)); toast('Вход выполнен онлайн'); unlockApp()
-        }
+async function registerUser() {
+  const name=(el('authName')?.value||'').trim();
+  const surname=(el('authSurname')?.value||'').trim();
+  const phone=cleanPhone(el('authPhone')?.value||'');
+
+  if(name.length<2||surname.length<2) {
+    toast('Введите имя и фамилию');
+    return;
+  }
+
+  if(!/^\+7\d{10}$/.test(phone)) {
+    toast('Введите номер в формате +7XXXXXXXXXX');
+    return;
+  }
+
+  const deviceId=getDeviceId();
+  const localLockedPhone=localStorage.getItem(deviceAccountKey);
+  const onlineDevice=await loadDeviceLock(deviceId);
+
+  if(localLockedPhone && localLockedPhone!==phone) {
+    toast('На этом устройстве уже зарегистрирован аккаунт');
+    return;
+  }
+
+  if(onlineDevice && onlineDevice.phone && onlineDevice.phone!==phone) {
+    localStorage.setItem(deviceAccountKey, onlineDevice.phone);
+    toast('На этом устройстве уже зарегистрирован аккаунт');
+    return;
+  }
+
+  const existingOnline=await loadOnlineSave(phone);
+
+  if(existingOnline && existingOnline.user) {
+    toast('Этот номер уже зарегистрирован. Используйте вход.');
+    showAuthForm('login');
+    const loginInput=el('loginPhone');
+    if(loginInput) loginInput.value=phone;
+    return;
+  }
+
+  const users=getUsers();
+
+  users[phone]={
+    name:name,
+    surname:surname,
+    phone:phone,
+    deviceId:deviceId,
+    createdAt:new Date().toISOString()
+  };
+
+  setUsers(users);
+  localStorage.setItem(sessionKey, phone);
+  localStorage.setItem(deviceAccountKey, phone);
+
+  currentUserPhone=phone;
+  currentUser=users[phone];
+  saveKey=makeSaveKey(phone);
+  game=loadGame();
+
+  await saveOnline();
+  await saveDeviceLock(deviceId, phone);
+
+  toast('Профиль создан онлайн');
+  unlockApp();
+}
+
+async function loginUser() {
+  const phone=cleanPhone(el('loginPhone')?.value||'');
+
+  if(!/^\+7\d{10}$/.test(phone)) {
+    toast('Введите номер в формате +7XXXXXXXXXX');
+    return;
+  }
+
+  const users=getUsers();
+  const online=await loadOnlineSave(phone);
+
+  if(!online || !online.user) {
+    toast('Номер не найден. Сначала зарегистрируйтесь.');
+    return;
+  }
+
+  users[phone]=online.user;
+  setUsers(users);
+
+  localStorage.setItem(sessionKey, phone);
+
+  currentUserPhone=phone;
+  currentUser=users[phone];
+  saveKey=makeSaveKey(phone);
+
+  game=online.game ? Object.assign({}, defaults, online.game) : loadGame();
+  game.daily=Object.assign({}, defaults.daily, game.daily||{});
+  game.income=Object.assign({}, defaults.income, game.income||{});
+
+  localStorage.setItem(saveKey, JSON.stringify(game));
+
+  toast('Вход выполнен онлайн');
+  unlockApp();
+}
+
          function logoutUser() {
           save(); localStorage.removeItem(sessionKey); currentUserPhone=''; currentUser=null; saveKey=makeSaveKey(''); game=loadGame(); document.body.classList.add('auth-locked'); showAuthForm('login'); toast('Вы вышли')
         }
