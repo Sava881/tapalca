@@ -10,6 +10,7 @@
 <title>
   Рабочий обзор — турнир и правила
 </title>
+<link rel="icon" href="data:,">
     <style>
       :root {
          --blue:#0ea5d7;
@@ -2179,6 +2180,12 @@ const tournamentLocalKey='workerTapalkaTournamentLocal_v1';
 const deviceKey='workerTapalkaDeviceId_v1';
 const deviceAccountKey='workerTapalkaDeviceAccount_v1';
 
+/* TEST MODE:
+   true  = можно регистрировать много аккаунтов с одного устройства
+   false = защита устройства включена
+*/
+const DISABLE_DEVICE_LOCK_FOR_TESTS=true;
+
         const firebaseConfig={
           apiKey:'AIzaSyDJZvB6afm-2q0x7LGTwH5u0wB1rrwu61E',
           authDomain:'rabohiy-obzor-tapalca.firebaseapp.com',
@@ -2197,7 +2204,13 @@ const deviceAccountKey='workerTapalkaDeviceAccount_v1';
           }, income: {
             dispatcher:0, toolbox:0, brigade:0, contract:0
           }
-        }; let game=loadGame(), taskTick=null, spawnTick=null, mainTick=null, incomeTick=null, eventTick=null; const addresses=['ул. Ленина 12',
+        };
+
+let game=loadGame(), taskTick=null, spawnTick=null, mainTick=null, incomeTick=null, eventTick=null;
+let tournamentLiveRef=null;
+let tournamentLiveStarted=false;
+
+        const addresses=['ул. Ленина 12',
         'пр. Мира 44',
         'склад Северный',
         'ТЦ Восток',
@@ -2475,7 +2488,9 @@ async function registerUser() {
     return;
   }
 
-  const deviceId=getDeviceId();
+const deviceId=getDeviceId();
+
+if(!DISABLE_DEVICE_LOCK_FOR_TESTS) {
   const localLockedPhone=localStorage.getItem(deviceAccountKey);
   const onlineDevice=await loadDeviceLock(deviceId);
 
@@ -2489,6 +2504,7 @@ async function registerUser() {
     toast('На этом устройстве уже зарегистрирован аккаунт');
     return;
   }
+}
 
   const existingOnline=await loadOnlineSave(phone);
 
@@ -2512,7 +2528,9 @@ async function registerUser() {
 
   setUsers(users);
   localStorage.setItem(sessionKey, phone);
+if(!DISABLE_DEVICE_LOCK_FOR_TESTS) {
   localStorage.setItem(deviceAccountKey, phone);
+}
 
   currentUserPhone=phone;
   currentUser=users[phone];
@@ -2520,7 +2538,9 @@ async function registerUser() {
   game=loadGame();
 
   await saveOnline();
+  if(!DISABLE_DEVICE_LOCK_FOR_TESTS) {
   await saveDeviceLock(deviceId, phone);
+}
 
   toast('Профиль создан онлайн');
   unlockApp();
@@ -2591,40 +2611,134 @@ async function loginUser() {
             if((b.cents||0)!==(a.cents||0))return (b.cents||0)-(a.cents||0); return (b.level||0)-(a.level||0)
           })
         }
-         async function syncTournamentOnline() {
-          upsertLocalTournament();
-          if(!db){
-            txt('tournamentStatus','локально');
-            return tournamentSort(getLocalTournament())
-          }
-          txt('tournamentStatus','онлайн');
-          try{
-            await saveOnline();
-            const snap=await db.ref('players').orderByChild('cents').limitToLast(50).get();
-            const list=[];
-            snap.forEach(child=>list.push(child.val()));
-            return tournamentSort(list)
-          }catch(e){
-            console.error(e);
-            txt('tournamentStatus','ошибка');
-            return tournamentSort(getLocalTournament())
-          }
-        }
-         function placeBadge(index) {
-          if(index===0)return '<div class="tournament-place gold">1</div>'; if(index===1)return '<div class="tournament-place silver">2</div>'; if(index===2)return '<div class="tournament-place bronze">3</div>'; return '<div class="tournament-place">'+(index+1)+'</div>'
-        }
-         function renderTournamentList(list) {
-          const box=el('tournamentList'); if(!box)return; const sorted=tournamentSort(list); if(!sorted.length) {
-            box.innerHTML='<div class="tournament-empty">Пока нет игроков. Зарегистрируйся и сделай первый заказ.</div>'; return
-          }
-          box.innerHTML=sorted.map((p, i)=>'<div class="tournament-player '+(p.phone===currentUserPhone?'me':'')+'">'+placeBadge(i)+'<div><div class="tournament-name">'+(p.name||'Игрок')+' '+(p.surname||'')+'</div><div class="tournament-phone">'+maskPhone(p.phone)+(p.phone===currentUserPhone?' • это вы':'')+'</div></div><div class="tournament-score"><b>'+money(p.cents||0)+'</b><span>ур. '+(p.level||1)+'</span></div></div>').join('')
-        }
-         async function renderTournament() {
-          const list=await syncTournamentOnline(); renderTournamentList(list)
-        }
-         function refreshTournament() {
-          renderTournament(); toast('Турнир обновлён')
-        }
+
+async function syncTournamentOnline() {
+  upsertLocalTournament();
+
+  if(!db) {
+    txt('tournamentStatus','локально');
+    return tournamentSort(getLocalTournament());
+  }
+
+  txt('tournamentStatus','онлайн');
+
+  try {
+    await saveOnline();
+
+    const snap=await db.ref('players').orderByChild('cents').get();
+    const list=[];
+
+    snap.forEach(child=>{
+      const p=child.val();
+      if(p && p.phone) list.push(p);
+    });
+
+    return tournamentSort(list);
+  } catch(e) {
+    console.error(e);
+    txt('tournamentStatus','ошибка');
+    return tournamentSort(getLocalTournament());
+  }
+}
+
+function placeBadge(index) {
+  if(index===0) {
+    return '<div class="tournament-place gold">1</div>';
+  }
+
+  if(index===1) {
+    return '<div class="tournament-place silver">2</div>';
+  }
+
+  if(index===2) {
+    return '<div class="tournament-place bronze">3</div>';
+  }
+
+  return '<div class="tournament-place">'+(index+1)+'</div>';
+}
+
+function renderTournamentMyPlace(sorted) {
+  const myIndex=sorted.findIndex(p=>p.phone===currentUserPhone);
+
+  if(myIndex<0) {
+    return '<div class="tournament-empty">Ваш аккаунт ещё не попал в онлайн-таблицу. Сделайте действие в игре или нажмите обновить.</div>';
+  }
+
+  const me=sorted[myIndex];
+
+  return '<div class="tournament-player me">'
+    + placeBadge(myIndex)
+    + '<div><div class="tournament-name">Ваше место: '+(myIndex+1)+' из '+sorted.length+'</div>'
+    + '<div class="tournament-phone">'+maskPhone(me.phone)+' • это вы</div></div>'
+    + '<div class="tournament-score"><b>'+money(me.cents||0)+'</b><span>ур. '+(me.level||1)+'</span></div>'
+    + '</div>';
+}
+
+function renderTournamentList(list) {
+  const box=el('tournamentList');
+  if(!box)return;
+
+  const sorted=tournamentSort(list);
+
+  if(!sorted.length) {
+    box.innerHTML='<div class="tournament-empty">Пока нет игроков. Зарегистрируйся и сделай первый заказ.</div>';
+    return;
+  }
+
+  const myPlaceHtml=renderTournamentMyPlace(sorted);
+
+  const tableHtml=sorted.map((p, i)=>
+    '<div class="tournament-player '+(p.phone===currentUserPhone?'me':'')+'">'
+    + placeBadge(i)
+    + '<div><div class="tournament-name">'+(p.name||'Игрок')+' '+(p.surname||'')+'</div>'
+    + '<div class="tournament-phone">'+maskPhone(p.phone)+(p.phone===currentUserPhone?' • это вы':'')+'</div></div>'
+    + '<div class="tournament-score"><b>'+money(p.cents||0)+'</b><span>ур. '+(p.level||1)+'</span></div>'
+    + '</div>'
+  ).join('');
+
+  box.innerHTML=myPlaceHtml+'<div style="height:10px"></div>'+tableHtml;
+}
+
+async function renderTournament() {
+  const list=await syncTournamentOnline();
+  renderTournamentList(list);
+}
+
+function startTournamentRealtime() {
+  if(!db) {
+    renderTournament();
+    return;
+  }
+
+  if(tournamentLiveStarted)return;
+
+  tournamentLiveStarted=true;
+  tournamentLiveRef=db.ref('players').orderByChild('cents');
+
+  txt('tournamentStatus','онлайн');
+
+  tournamentLiveRef.on('value', snap=>{
+    const list=[];
+
+    snap.forEach(child=>{
+      const p=child.val();
+      if(p && p.phone) list.push(p);
+    });
+
+    renderTournamentList(list);
+  }, err=>{
+    console.error(err);
+    txt('tournamentStatus','ошибка');
+    renderTournamentList(getLocalTournament());
+  });
+}
+
+async function refreshTournament() {
+  await saveOnline();
+  renderTournament();
+  toast('Турнир обновлён');
+}
+
          function loadGame() {
           let saved={
           }; try {
@@ -2867,9 +2981,22 @@ async function loginUser() {
         function resetGame() {
           if(!confirm('Сбросить весь прогресс?'))return; localStorage.removeItem(saveKey); location.reload()
         }
-        function openTab(id, nav) {
-          document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active')); const sc=el(id); if(sc)sc.classList.add('active'); document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active')); if(nav)nav.classList.add('active'); render(); if(id==='tournament')renderTournament()
-        }
+
+function openTab(id,nav){
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  const sc=el(id);
+  if(sc)sc.classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  if(nav)nav.classList.add('active');
+
+  render();
+
+  if(id==='tournament'){
+    saveOnline();
+    startTournamentRealtime();
+  }
+}
+
          function startLoops() {
           clearInterval(mainTick); clearInterval(incomeTick); clearInterval(eventTick); mainTick=setInterval(()=>{
             if(game.energy<game.maxEnergy) {
