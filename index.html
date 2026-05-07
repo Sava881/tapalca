@@ -3,11 +3,13 @@
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>
-      Рабочий обзор — турнир и правила
-    </title>
-    <script type="text/javascript" src="https://ff.kis.v2.scr.kaspersky-labs.com/FD126C42-EBFA-4E12-B309-BB3FDD723AC1/main.js?attr=iqCPkiMDt2_j1KUY0dO-w6J7lg0X23XLfqkJ3Qb7Q8rWm90ZAGKVYRDTknae8GgSHoXWHJDjFpK8Z5bvBWz4tFtS5Pcny90u76sSm3mM5Bo0F3emETwyPYXRGBp5k41y_JiEUT6n9NbC2DIOYf8kuhgc_Gf6f5ZSXq93-h1IxVCN-MB4hakgAQEI35uHBuw5XNJq2s2E0I2J2C--1rqgssrIro103C-HXZH6Eap-hcwWzN8TItTPEooNUNXeYTQPQiH6paRZnQyckvM08aIiVA" charset="UTF-8"></script><script type="text/javascript" src="https://ff.kis.v2.scr.kaspersky-labs.com/FD126C42-EBFA-4E12-B309-BB3FDD723AC1/main.js?attr=J1DLFFNPzLCVgEkQZk3tKWRim9kke--qzAKXzP8kDnvW1Uu5xkajEFBmIP2y0epKhArR2Qkc3-ejkxg9L9owq1UKHYID7yG6jjquUPH1gjLf3Fc6jtY33PgK_eQ83dLzYorq6wNarR4zLvpP-oQzIiAQl4T9jYnDnHNQDddP5JW7uSnRczVbUahnCp0hAKOu42wots1WC6pUPPoNoV2U0RcOdQ09JltRi-V3FL4YTqjECo-iaynRBwYtfeR2oA5LJM8imFqmExQ-LOoJmNp9fw" charset="UTF-8">
-    </script>
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-database-compat.js"></script>
+
+<title>
+  Рабочий обзор — турнир и правила
+</title>
     <style>
       :root {
          --blue:#0ea5d7;
@@ -1941,11 +1943,7 @@
             Обновить турнир
           </button>
           <div class="tournament-note">
-            Для настоящего онлайн-турнира нужен сервер или база данных. В коде уже есть безопасный блок
-            <strong>
-              TOURNAMENT_API_URL
-            </strong>
-            : если указать адрес API, игроки будут видеть друг друга онлайн. Без API турнир работает локально в этом браузере.
+            Онлайн-турнир подключён через Firebase Realtime Database. Если интернет недоступен, игра временно покажет локальные данные из этого браузера.
           </div>
         </div>
       </section>
@@ -2137,7 +2135,54 @@
             minimumFractionDigits:2, maximumFractionDigits:2
           })+' ₽'
         }
-         html('navIcon1', icons.box); html('navIcon2', icons.tool); html('navIcon3', icons.trophy); html('navIcon4', icons.list); html('navIcon5', icons.user); const usersKey='workerTapalkaUsers_v1'; const sessionKey='workerTapalkaSessionPhone_v1'; const tournamentLocalKey='workerTapalkaTournamentLocal_v1'; const TOURNAMENT_API_URL=''; // сюда можно вставить URL вашего API для настоящего онлайн-турнира
+        function safePhoneKey(phone){
+          return String(phone||'').replace(/\D/g,'')
+        }
+        function onlinePlayerData(){
+          return {
+            phone:currentUserPhone,
+            name:currentUser?.name||'',
+            surname:currentUser?.surname||'',
+            cents:game.cents||0,
+            level:game.level||1,
+            bestCombo:game.bestCombo||0,
+            passive:passivePerHour(),
+            updatedAt:Date.now()
+          }
+        }
+        function onlineSaveData(){
+          return {
+            user:currentUser,
+            game:game,
+            player:onlinePlayerData(),
+            updatedAt:Date.now()
+          }
+        }
+        async function saveOnline(){
+          if(!currentUserPhone||!currentUser||!db)return;
+          const key=safePhoneKey(currentUserPhone);
+          await db.ref('players/'+key).set(onlinePlayerData());
+          await db.ref('saves/'+key).set(onlineSaveData())
+        }
+        async function loadOnlineSave(phone){
+          if(!phone||!db)return null;
+          const key=safePhoneKey(phone);
+          const snap=await db.ref('saves/'+key).get();
+          return snap.exists()?snap.val():null
+        }
+         html('navIcon1', icons.box); html('navIcon2', icons.tool); html('navIcon3', icons.trophy); html('navIcon4', icons.list); html('navIcon5', icons.user); const usersKey='workerTapalkaUsers_v1'; const sessionKey='workerTapalkaSessionPhone_v1'; const tournamentLocalKey='workerTapalkaTournamentLocal_v1';
+        const firebaseConfig={
+          apiKey:'AIzaSyDJZvB6afm-2q0x7LGTwH5u0wB1rrwu61E',
+          authDomain:'rabohiy-obzor-tapalca.firebaseapp.com',
+          databaseURL:'https://rabohiy-obzor-tapalca-default-rtdb.europe-west1.firebasedatabase.app',
+          projectId:'rabohiy-obzor-tapalca',
+          storageBucket:'rabohiy-obzor-tapalca.firebasestorage.app',
+          messagingSenderId:'739933510355',
+          appId:'1:739933510355:web:f7a15c168f1921ca839226',
+          measurementId:'G-VW0699XRHM'
+        };
+        const firebaseApp=firebase.initializeApp(firebaseConfig);
+        const db=firebase.database();
         let currentUserPhone=localStorage.getItem(sessionKey)||''; let currentUser=null; let saveKey=makeSaveKey(currentUserPhone); const defaults={
           cents:0, totalCents:0, energy:120, maxEnergy:120, level:1, combo:0, bestCombo:0, power:1, regen:1, crit:3, rating:100, streak:0, fast:0, focusUntil:0, fatigue:0, task:null, history:[], lastIncomeAt:now(), incomeRemainder:0, event:null, eventUntil:0, daily: {
             done:0, fast:0, rush:0, inspect:0, date:new Date().toDateString()
@@ -2377,7 +2422,7 @@
             document.body.classList.add('auth-locked')
           }
         }
-         function registerUser() {
+         async function registerUser() {
           const name=(el('authName')?.value||'').trim(); const surname=(el('authSurname')?.value||'').trim(); const phone=cleanPhone(el('authPhone')?.value||''); if(name.length<2||surname.length<2) {
             toast('Введите имя и фамилию'); return
           }
@@ -2386,13 +2431,18 @@
           }
           const users=getUsers(); users[phone]={
             name, surname, phone, createdAt:new Date().toISOString()
-          }; setUsers(users); localStorage.setItem(sessionKey, phone); currentUserPhone=phone; currentUser=users[phone]; saveKey=makeSaveKey(phone); game=loadGame(); toast('Профиль создан'); unlockApp()
+          }; setUsers(users); localStorage.setItem(sessionKey, phone); currentUserPhone=phone; currentUser=users[phone]; saveKey=makeSaveKey(phone); game=loadGame(); await saveOnline(); toast('Профиль создан онлайн'); unlockApp()
         }
-         function loginUser() {
-          const phone=cleanPhone(el('loginPhone')?.value||''); const users=getUsers(); if(!users[phone]) {
-            toast('Номер не найден. Сначала зарегистрируйтесь.'); return
+         async function loginUser() {
+          const phone=cleanPhone(el('loginPhone')?.value||''); const users=getUsers(); let online=null;
+          if(!users[phone]) {
+            online=await loadOnlineSave(phone);
+            if(!online||!online.user){toast('Номер не найден. Сначала зарегистрируйтесь.'); return}
+            users[phone]=online.user; setUsers(users)
+          } else {
+            online=await loadOnlineSave(phone)
           }
-          localStorage.setItem(sessionKey, phone); currentUserPhone=phone; currentUser=users[phone]; saveKey=makeSaveKey(phone); game=loadGame(); toast('Вход выполнен'); unlockApp()
+          localStorage.setItem(sessionKey, phone); currentUserPhone=phone; currentUser=users[phone]; saveKey=makeSaveKey(phone); game=online&&online.game?Object.assign({}, defaults, online.game):loadGame(); game.daily=Object.assign({}, defaults.daily, game.daily||{}); game.income=Object.assign({}, defaults.income, game.income||{}); localStorage.setItem(saveKey, JSON.stringify(game)); toast('Вход выполнен онлайн'); unlockApp()
         }
          function logoutUser() {
           save(); localStorage.removeItem(sessionKey); currentUserPhone=''; currentUser=null; saveKey=makeSaveKey(''); game=loadGame(); document.body.classList.add('auth-locked'); showAuthForm('login'); toast('Вы вышли')
@@ -2425,20 +2475,22 @@
           })
         }
          async function syncTournamentOnline() {
-           upsertLocalTournament(); if(!TOURNAMENT_API_URL) {
-            txt('tournamentStatus', 'локально'); return tournamentSort(getLocalTournament())
+          upsertLocalTournament();
+          if(!db){
+            txt('tournamentStatus','локально');
+            return tournamentSort(getLocalTournament())
           }
-           txt('tournamentStatus', 'онлайн'); try {
-             await fetch(TOURNAMENT_API_URL,  {
-              method:'POST', headers: {
-                'Content-Type':'application/json'
-              }, body:JSON.stringify({
-                phone:currentUserPhone, name:currentUser.name, surname:currentUser.surname, level:game.level, cents:game.cents
-              })
-            }); const res=await fetch(TOURNAMENT_API_URL+'?t='+Date.now()); const data=await res.json(); return tournamentSort(Array.isArray(data)?data:(data.players||[]));
-          }
-          catch(e) {
-            txt('tournamentStatus', 'локально'); return tournamentSort(getLocalTournament())
+          txt('tournamentStatus','онлайн');
+          try{
+            await saveOnline();
+            const snap=await db.ref('players').orderByChild('cents').limitToLast(50).get();
+            const list=[];
+            snap.forEach(child=>list.push(child.val()));
+            return tournamentSort(list)
+          }catch(e){
+            console.error(e);
+            txt('tournamentStatus','ошибка');
+            return tournamentSort(getLocalTournament())
           }
         }
          function placeBadge(index) {
@@ -2475,7 +2527,7 @@
         }
         function save() {
           try {
-            localStorage.setItem(saveKey, JSON.stringify(game)); upsertLocalTournament()
+            localStorage.setItem(saveKey, JSON.stringify(game)); upsertLocalTournament(); saveOnline()
           }
           catch(e) {
           }
